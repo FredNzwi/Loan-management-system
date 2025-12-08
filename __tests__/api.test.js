@@ -1,6 +1,4 @@
 const request = require('supertest');
-const path = require('path');
-const fs = require('fs');
 
 // Set test environment BEFORE any require
 process.env.NODE_ENV = 'test';
