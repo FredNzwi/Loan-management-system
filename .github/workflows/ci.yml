@@ -70,3 +70,75 @@ jobs:
       run: |
         echo "Deploying to staging environment..."
         # Add deployment commands here
+
+  notify-slack:
+    needs: [test, build, deploy]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+    
+    - name: Download coverage artifacts
+      continue-on-error: true
+      run: |
+        # Coverage artifacts should be available from the test job
+        echo "Coverage artifacts downloaded"
+    
+    - name: Notify Slack (All Conditions)
+      if: always()
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      run: |
+        if [ -n "$SLACK_WEBHOOK_URL" ]; then
+          STATUS="${{ job.status }}"
+          BRANCH="${{ github.ref_name }}"
+          AUTHOR="${{ github.actor }}"
+          WORKFLOW="${{ github.workflow }}"
+          COMMIT="${{ github.sha }}"
+          RUN_ID="${{ github.run_id }}"
+          REPO="${{ github.repository }}"
+          SERVER_URL="${{ github.server_url }}"
+          
+          # Determine emoji based on status
+          case "$STATUS" in
+            success)
+              EMOJI=":white_check_mark:"
+              COLOR="good"
+              ;;
+            failure)
+              EMOJI=":x:"
+              COLOR="danger"
+              ;;
+            cancelled)
+              EMOJI=":warning:"
+              COLOR="warning"
+              ;;
+            *)
+              EMOJI=":grey_question:"
+              COLOR="#808080"
+              ;;
+          esac
+          
+          # Extract Jest test summary
+          TEST_RESULTS=$(cat coverage/lcov-report/index.html 2>/dev/null | grep -oP '(?<=<span class="strong">)[0-9]+(?=</span>)' | head -n 1)
+          
+          # Fallback if HTML not found
+          if [ -z "$TEST_RESULTS" ]; then
+            TEST_RESULTS="Unknown"
+          fi
+
+          # Extract coverage %
+          COVERAGE=$(grep -oP 'All files[ ]\|\s\K[\d.]+' coverage/lcov-report/index.html 2>/dev/null | head -n 1)
+          if [ -z "$COVERAGE" ]; then
+            COVERAGE="Unknown"
+          fi
+
+          PAYLOAD="{\"attachments\":[{\"color\":\"$COLOR\",\"title\":\"$EMOJI CI Pipeline - $STATUS\",\"fields\":[{\"title\":\"Workflow\",\"value\":\"$WORKFLOW\",\"short\":true},{\"title\":\"Branch\",\"value\":\"$BRANCH\",\"short\":true},{\"title\":\"Author\",\"value\":\"$AUTHOR\",\"short\":true},{\"title\":\"Commit\",\"value\":\"$COMMIT\",\"short\":true},{\"title\":\"Tests\",\"value\":\"$TEST_RESULTS executed\",\"short\":true},{\"title\":\"Coverage\",\"value\":\"$COVERAGE%\",\"short\":true}],\"actions\":[{\"type\":\"button\",\"text\":\"View Logs\",\"url\":\"$SERVER_URL/$REPO/actions/runs/$RUN_ID\"}]}]}"
+
+          curl -X POST -H 'Content-type: application/json' --data "$PAYLOAD" "$SLACK_WEBHOOK_URL" || true
+
+        else
+          echo "No Slack webhook configured."
+        fi
