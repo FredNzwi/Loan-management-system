@@ -154,6 +154,7 @@ app.post('/api/loans', async (req, res) => {
 
     // Simple validation example from roadmap
     if (amount <= 0 || amount > 1000000) return res.status(400).json({ error: 'Invalid loan amount' });
+    if (term_months <= 0 || term_months > 360) return res.status(400).json({ error: 'Invalid loan term (1-360 months)' });
 
     if (isMemoryMode) {
       const id = (memoryStore.loans.length > 0 ? Math.max(...memoryStore.loans.map(l => l.id)) : 0) + 1;
@@ -288,9 +289,17 @@ app.get('/api/loans/:id/repayments', async (req, res) => {
     const { id } = req.params;
     
     if (isMemoryMode) {
+      // Verify loan exists
+      const loan = memoryStore.loans.find(l => l.id === parseInt(id, 10));
+      if (!loan) return res.status(404).json({ error: 'Loan not found' });
+      
       const rows = memoryStore.repayments.filter(r => r.loan_id === parseInt(id, 10));
       res.json(rows);
     } else {
+      // Verify loan exists
+      const [loans] = await db.execute('SELECT id FROM loans WHERE id = ?', [id]);
+      if (loans.length === 0) return res.status(404).json({ error: 'Loan not found' });
+      
       const [rows] = await db.execute('SELECT * FROM repayments WHERE loan_id = ? ORDER BY paid_at DESC', [id]);
       res.json(rows);
     }
@@ -303,10 +312,18 @@ app.get('/api/loans/:id/repayments', async (req, res) => {
 const PORT = process.env.PORT || 3000;
 
 async function startServer() {
-  await initDB();
   app.listen(PORT, () => {
     console.log(`Loan management server running on port ${PORT}`);
   });
 }
 
-startServer();
+// Initialize database (happens for both production and testing)
+initDB();
+
+// Only start the server in production; in tests, just export the app
+if (process.env.NODE_ENV !== 'test') {
+  startServer();
+}
+
+// Export app for testing
+module.exports = app;
