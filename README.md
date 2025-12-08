@@ -312,15 +312,98 @@ npm run lint          # Code quality checks
 - [ ] Security headers implementation
 - [ ] Vulnerability scanning in CI
 
+## 🎯 Phase 5: Release Pipeline
+
+Complete automated release pipeline with semantic versioning, Docker deployment, and team notifications.
+
+### Release Features
+- ✅ **Semantic Versioning** - Automatic version bumping (major/minor/patch)
+- ✅ **Git Tagging** - Automatic git tag creation for releases
+- ✅ **Docker Hub** - Automated Docker image building and pushing
+- ✅ **Release Artifacts** - Generate deployment packages
+- ✅ **GitHub Releases** - Automatic release page creation
+- ✅ **Slack Notifications** - Notify team on release completion
+- ✅ **Build Caching** - Optimized Docker builds
+
+### Quick Release
+```bash
+# Prepare release (bumps version)
+./scripts/release.sh prepare minor
+
+# Publish release (creates tag and triggers pipeline)
+./scripts/release.sh publish
+
+# Done! GitHub Actions handles the rest
+```
+
+### Release Documentation
+- **[PHASE_5_DELIVERY_SUMMARY.md](./PHASE_5_DELIVERY_SUMMARY.md)** - Overview of Phase 5
+- **[PHASE_5_CHECKLIST.md](./PHASE_5_CHECKLIST.md)** - Setup and verification checklist
+- **[RELEASE_QUICK_REF.md](./RELEASE_QUICK_REF.md)** - Quick command reference
+- **[GITHUB_SECRETS_SETUP.md](./GITHUB_SECRETS_SETUP.md)** - GitHub secrets configuration
+- **[PHASE_5_RELEASE.md](./PHASE_5_RELEASE.md)** - Complete implementation guide
+- **[DOCKER_REGISTRY_SETUP.md](./DOCKER_REGISTRY_SETUP.md)** - Docker deployment guide
+- **[PHASE_5_DOCS_INDEX.md](./PHASE_5_DOCS_INDEX.md)** - Documentation navigation
+
+### Release Workflow
+```
+Commit & Push → ./scripts/release.sh prepare → Bump version
+     ↓
+git push → ./scripts/release.sh tag → Create git tag (v1.0.0)
+     ↓
+./scripts/release.sh publish → Push tag to GitHub
+     ↓
+GitHub Actions Release Pipeline (automatic)
+├─ verify     - Validate version format
+├─ build-and-push - Build & push Docker image
+├─ generate-release-artifacts - Create packages
+├─ create-github-release - Create GitHub release
+└─ notify-release - Send Slack notification
+     ↓
+Release Complete! 🎉
+```
+
+### Release Management Commands
+```bash
+# Check current version
+./scripts/release.sh current
+
+# Bump version
+./scripts/release.sh bump patch   # 1.0.0 → 1.0.1
+./scripts/release.sh bump minor   # 1.0.0 → 1.1.0
+./scripts/release.sh bump major   # 1.0.0 → 2.0.0
+
+# Create and publish release
+./scripts/release.sh prepare patch  # Bump + info
+./scripts/release.sh tag            # Create git tag
+./scripts/release.sh publish        # Push tag
+
+# List releases
+./scripts/release.sh list           # Show all tags
+```
+
+### Docker Image Deployment
+After release, images are available on Docker Hub:
+```bash
+# Pull and run released image
+docker pull USERNAME/notes-app:1.0.0
+docker run -d -p 3000:3000 USERNAME/notes-app:1.0.0
+
+# Or use latest
+docker pull USERNAME/notes-app:latest
+docker run -d -p 3000:3000 USERNAME/notes-app:latest
+```
+
 ## 📞 Support
 
 For issues and questions:
 - Create GitHub issue
 - Check existing documentation
 - Review CI/CD pipeline logs
+- See Phase 5 docs for release help
 
 ---
 
 **Built with ❤️ for DevOps learning and demonstration**
 
-Last updated: January 2024
+Last updated: December 2024

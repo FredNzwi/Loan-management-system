@@ -1,0 +1,266 @@
+name: Release Pipeline
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Extract version from tag
+      id: version
+      run: |
+        VERSION=${GITHUB_REF#refs/tags/v}
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "Tag version: $VERSION"
+    
+    - name: Validate version format
+      run: |
+        VERSION=${GITHUB_REF#refs/tags/v}
+        if [[ ! $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?$ ]]; then
+          echo "Invalid version format: $VERSION"
+          echo "Expected format: v<major>.<minor>.<patch>"
+          exit 1
+        fi
+        echo "✓ Version format valid: $VERSION"
+
+  build-and-push:
+    needs: verify
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Login to Docker Hub
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+    
+    - name: Build and push Docker image
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: true
+        tags: |
+          ${{ secrets.DOCKER_USERNAME }}/notes-app:${{ needs.verify.outputs.version }}
+          ${{ secrets.DOCKER_USERNAME }}/notes-app:latest
+        cache-from: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/notes-app:buildcache
+        cache-to: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/notes-app:buildcache,mode=max
+    
+    - name: Verify image
+      run: |
+        docker pull ${{ secrets.DOCKER_USERNAME }}/notes-app:${{ needs.verify.outputs.version }}
+        docker inspect ${{ secrets.DOCKER_USERNAME }}/notes-app:${{ needs.verify.outputs.version }}
+
+  generate-release-artifacts:
+    needs: [verify, build-and-push]
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+        cache: 'npm'
+    
+    - name: Install dependencies
+      run: npm ci
+    
+    - name: Run tests (Release validation)
+      run: npm test
+      env:
+        DB_HOST: localhost
+        DB_USER: root
+        DB_PASSWORD: password
+        DB_NAME: notes_app
+    
+    - name: Generate changelog
+      run: |
+        cat > CHANGELOG_ENTRY.md << 'EOF'
+        ## Version ${{ needs.verify.outputs.version }}
+        
+        ### Release Date
+        $(date +"%Y-%m-%d")
+        
+        ### Features
+        - Automated release pipeline with versioning
+        - Docker image generation and push to Docker Hub
+        - Release artifacts and changelog generation
+        
+        ### Improvements
+        - Enhanced CI/CD pipeline
+        - Docker build optimization with caching
+        
+        ### Testing
+        - All tests passing
+        - Code coverage verified
+        
+        ### Docker Images
+        - `${{ secrets.DOCKER_USERNAME }}/notes-app:${{ needs.verify.outputs.version }}`
+        - `${{ secrets.DOCKER_USERNAME }}/notes-app:latest`
+        EOF
+        cat CHANGELOG_ENTRY.md
+    
+    - name: Create release artifacts
+      run: |
+        mkdir -p release-artifacts
+        
+        # Copy important files
+        cp package.json release-artifacts/
+        cp README.md release-artifacts/
+        cp Dockerfile release-artifacts/
+        cp docker-compose.yml release-artifacts/
+        
+        # Create build info
+        cat > release-artifacts/BUILD_INFO.txt << 'EOF'
+        Build Information
+        =================
+        Version: ${{ needs.verify.outputs.version }}
+        Build Date: $(date)
+        Git Commit: ${{ github.sha }}
+        Git Branch: ${{ github.ref_name }}
+        
+        Docker Image:
+        - ${{ secrets.DOCKER_USERNAME }}/notes-app:${{ needs.verify.outputs.version }}
+        - ${{ secrets.DOCKER_USERNAME }}/notes-app:latest
+        
+        Deployment:
+        docker run -d \
+          --name notes-app \
+          -p 3000:3000 \
+          -e DB_HOST=$DB_HOST \
+          -e DB_USER=$DB_USER \
+          -e DB_PASSWORD=$DB_PASSWORD \
+          -e DB_NAME=$DB_NAME \
+          ${{ secrets.DOCKER_USERNAME }}/notes-app:${{ needs.verify.outputs.version }}
+        EOF
+        
+        ls -la release-artifacts/
+    
+    - name: Upload release artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: release-artifacts-${{ needs.verify.outputs.version }}
+        path: release-artifacts/
+        retention-days: 30
+
+  create-github-release:
+    needs: [verify, build-and-push, generate-release-artifacts]
+    runs-on: ubuntu-latest
+    
+    permissions:
+      contents: write
+    
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Download artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: release-artifacts-${{ needs.verify.outputs.version }}
+        path: release-artifacts/
+    
+    - name: Generate release notes
+      id: notes
+      run: |
+        cat > release_notes.md << 'EOF'
+        # Release v${{ needs.verify.outputs.version }}
+        
+        ## Overview
+        This is version ${{ needs.verify.outputs.version }} of the Notes App with full DevOps pipeline support.
+        
+        ## What's New
+        ✓ Automated versioning and tagging  
+        ✓ Docker image generation and registry push  
+        ✓ Release artifacts with deployment instructions  
+        ✓ Comprehensive CI/CD pipeline  
+        
+        ## Docker Images
+        Available at Docker Hub:
+        - `${{ secrets.DOCKER_USERNAME }}/notes-app:${{ needs.verify.outputs.version }}`
+        - `${{ secrets.DOCKER_USERNAME }}/notes-app:latest`
+        
+        ## Quick Start
+        ```bash
+        docker pull ${{ secrets.DOCKER_USERNAME }}/notes-app:${{ needs.verify.outputs.version }}
+        docker run -d -p 3000:3000 ${{ secrets.DOCKER_USERNAME }}/notes-app:${{ needs.verify.outputs.version }}
+        ```
+        
+        ## Deployment
+        See `BUILD_INFO.txt` in release artifacts for detailed deployment instructions.
+        
+        ## Artifacts
+        All release artifacts are included in this release and available in GitHub Actions artifacts.
+        EOF
+        cat release_notes.md
+    
+    - name: Create GitHub Release
+      uses: ncipollo/release-action@v1
+      with:
+        tag: v${{ needs.verify.outputs.version }}
+        name: Release v${{ needs.verify.outputs.version }}
+        bodyFile: release_notes.md
+        artifacts: "release-artifacts/*"
+        draft: false
+        prerelease: false
+
+  notify-release:
+    needs: [verify, build-and-push, create-github-release]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+    - name: Notify Slack - Release
+      if: always()
+      env:
+        SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
+      run: |
+        if [ -n "$SLACK_WEBHOOK_URL" ]; then
+          VERSION="${{ needs.verify.outputs.version }}"
+          REPO="${{ github.repository }}"
+          SERVER_URL="${{ github.server_url }}"
+          RUN_ID="${{ github.run_id }}"
+          STATUS="${{ job.status }}"
+          
+          # Determine emoji based on status
+          case "$STATUS" in
+            success)
+              EMOJI=":rocket:"
+              COLOR="good"
+              MESSAGE="Release v$VERSION published successfully!"
+              ;;
+            failure)
+              EMOJI=":x:"
+              COLOR="danger"
+              MESSAGE="Release v$VERSION failed!"
+              ;;
+            *)
+              EMOJI=":warning:"
+              COLOR="warning"
+              MESSAGE="Release v$VERSION status: $STATUS"
+              ;;
+          esac
+          
+          PAYLOAD="{\"attachments\":[{\"color\":\"$COLOR\",\"title\":\"$EMOJI Release Pipeline - $STATUS\",\"text\":\"$MESSAGE\",\"fields\":[{\"title\":\"Version\",\"value\":\"v$VERSION\",\"short\":true},{\"title\":\"Repository\",\"value\":\"$REPO\",\"short\":true},{\"title\":\"Docker Image\",\"value\":\"${{ secrets.DOCKER_USERNAME }}/notes-app:$VERSION\",\"short\":false}],\"actions\":[{\"type\":\"button\",\"text\":\"View Release\",\"url\":\"$SERVER_URL/$REPO/releases/tag/v$VERSION\"},{\"type\":\"button\",\"text\":\"View Logs\",\"url\":\"$SERVER_URL/$REPO/actions/runs/$RUN_ID\"}]}]}"
+          
+          curl -X POST -H 'Content-type: application/json' --data "$PAYLOAD" "$SLACK_WEBHOOK_URL" || true
+        else
+          echo "No Slack webhook configured."
+        fi

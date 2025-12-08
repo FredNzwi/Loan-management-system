@@ -9,7 +9,13 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "lint": "eslint .",
-    "lint:fix": "eslint . --fix"
+    "lint:fix": "eslint . --fix",
+    "release:prepare": "bash scripts/release.sh prepare",
+    "release:bump": "bash scripts/release.sh bump",
+    "release:tag": "bash scripts/release.sh tag",
+    "release:publish": "bash scripts/release.sh publish",
+    "release:info": "bash scripts/release.sh info",
+    "release:list": "bash scripts/release.sh list"
   },
   "dependencies": {
     "express": "^4.18.2",
