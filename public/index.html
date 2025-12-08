@@ -1,0 +1,301 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Loan Management - Demo</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+</head>
+<body class="bg-light">
+    <div class="container mt-5">
+        <div class="row">
+            <div class="col-md-8 mx-auto">
+                <h1 class="text-center mb-4">
+                    <i class="fas fa-hand-holding-usd text-success"></i> Loan Management (Demo)
+                </h1>
+
+                <div class="row mb-4">
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header">Register</div>
+                            <div class="card-body">
+                                <form id="registerForm">
+                                    <input class="form-control mb-2" id="regName" placeholder="Name" required>
+                                    <input class="form-control mb-2" id="regEmail" placeholder="Email" required>
+                                    <input class="form-control mb-2" id="regPassword" placeholder="Password" type="password" required>
+                                    <button class="btn btn-primary" type="submit">Register</button>
+                                </form>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="col-md-6">
+                        <div class="card">
+                            <div class="card-header">Login</div>
+                            <div class="card-body">
+                                <form id="loginForm">
+                                    <input class="form-control mb-2" id="loginEmail" placeholder="Email" required>
+                                    <input class="form-control mb-2" id="loginPassword" placeholder="Password" type="password" required>
+                                    <div class="form-check mb-2">
+                                        <input class="form-check-input" type="checkbox" id="adminCheck">
+                                        <label class="form-check-label" for="adminCheck">Simulate Admin (X-Admin)</label>
+                                    </div>
+                                    <button class="btn btn-success" type="submit">Login</button>
+                                </form>
+                                <div class="mt-2" id="currentUser"></div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card mb-4">
+                    <div class="card-header">Apply for a Loan</div>
+                    <div class="card-body">
+                        <form id="loanForm">
+                            <input class="form-control mb-2" id="loanAmount" placeholder="Amount" type="number" required>
+                            <input class="form-control mb-2" id="loanTerm" placeholder="Term (months)" type="number" required>
+                            <button class="btn btn-primary">Submit Application</button>
+                        </form>
+                    </div>
+                </div>
+
+                <div id="loansList"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.2/dist/js/bootstrap.bundle.min.js"></script>
+    <script>
+        // Minimal frontend logic to interact with the demo Loan Management API
+        let currentUser = null;
+        let simulateAdmin = false;
+
+        document.addEventListener('DOMContentLoaded', () => {
+            document.getElementById('registerForm').addEventListener('submit', onRegister);
+            document.getElementById('loginForm').addEventListener('submit', onLogin);
+            document.getElementById('loanForm').addEventListener('submit', onApplyLoan);
+            document.getElementById('adminCheck').addEventListener('change', (e) => {
+                simulateAdmin = e.target.checked;
+                updateCurrentUserDisplay();
+            });
+
+            loadLoans();
+        });
+
+        function updateCurrentUserDisplay() {
+            const el = document.getElementById('currentUser');
+            if (!currentUser) {
+                el.innerHTML = '<small class="text-muted">Not logged in</small>';
+                return;
+            }
+            el.innerHTML = `<div>Logged in as <strong>${currentUser.name}</strong> (id: ${currentUser.id}) ${simulateAdmin ? '<span class="badge bg-warning text-dark">Admin</span>' : ''}</div>`;
+        }
+
+        async function onRegister(e) {
+            e.preventDefault();
+            const name = document.getElementById('regName').value;
+            const email = document.getElementById('regEmail').value;
+            const password = document.getElementById('regPassword').value;
+
+            try {
+                const res = await fetch('/api/register', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ name, email, password })
+                });
+                if (res.ok) {
+                    showAlert('Registered successfully — you can now login', 'success');
+                    document.getElementById('registerForm').reset();
+                } else {
+                    const json = await res.json();
+                    showAlert(json.error || 'Registration failed', 'danger');
+                }
+            } catch (err) {
+                console.error(err);
+                showAlert('Registration failed', 'danger');
+            }
+        }
+
+        async function onLogin(e) {
+            e.preventDefault();
+            const email = document.getElementById('loginEmail').value;
+            const password = document.getElementById('loginPassword').value;
+
+            try {
+                const res = await fetch('/api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ email, password }) });
+                if (!res.ok) {
+                    const j = await res.json();
+                    showAlert(j.error || 'Login failed', 'danger');
+                    return;
+                }
+                const { user } = await res.json();
+                currentUser = user;
+                updateCurrentUserDisplay();
+                showAlert('Logged in', 'success');
+                loadLoans();
+            } catch (err) {
+                console.error(err);
+                showAlert('Login failed', 'danger');
+            }
+        }
+
+        function getAuthHeaders() {
+            const headers = { 'Content-Type': 'application/json' };
+            if (currentUser && currentUser.id) headers['X-User-Id'] = String(currentUser.id);
+            if (simulateAdmin) headers['X-Admin'] = 'true';
+            return headers;
+        }
+
+        async function onApplyLoan(e) {
+            e.preventDefault();
+            const amount = parseFloat(document.getElementById('loanAmount').value);
+            const term_months = parseInt(document.getElementById('loanTerm').value, 10);
+
+            try {
+                const res = await fetch('/api/loans', { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ amount, term_months }) });
+                if (res.ok) {
+                    showAlert('Loan application submitted', 'success');
+                    document.getElementById('loanForm').reset();
+                    loadLoans();
+                } else {
+                    const j = await res.json();
+                    showAlert(j.error || 'Failed to submit', 'danger');
+                }
+            } catch (err) {
+                console.error(err);
+                showAlert('Submission failed', 'danger');
+            }
+        }
+
+        async function loadLoans() {
+            try {
+                const res = await fetch('/api/loans', { headers: getAuthHeaders() });
+                if (!res.ok) return; // silently fail for now
+                const loans = await res.json();
+                displayLoans(loans);
+            } catch (err) {
+                console.error('loadLoans', err);
+            }
+        }
+
+        function displayLoans(loans) {
+            const container = document.getElementById('loansList');
+            if (!loans || loans.length === 0) {
+                container.innerHTML = '<div class="text-center text-muted">No loans found</div>';
+                return;
+            }
+
+            container.innerHTML = loans.map(loan => {
+                const applicant = loan.applicant_name ? `<div>Applicant: <strong>${loan.applicant_name}</strong> (${loan.applicant_email})</div>` : '';
+                return `
+                    <div class="card mb-3">
+                        <div class="card-body">
+                            ${applicant}
+                            <div>Loan ID: <strong>${loan.id}</strong></div>
+                            <div>Amount: <strong>${loan.amount}</strong></div>
+                            <div>Term (months): <strong>${loan.term_months}</strong></div>
+                            <div>Status: <strong>${loan.status}</strong></div>
+                            <div class="mt-2" id="loan-actions-${loan.id}"></div>
+                            <div class="mt-2" id="repayments-${loan.id}"></div>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+
+            // After rendering, attach actions
+            loans.forEach(loan => attachLoanActions(loan));
+        }
+
+        function attachLoanActions(loan) {
+            const actionsEl = document.getElementById(`loan-actions-${loan.id}`);
+            const repaymentsEl = document.getElementById(`repayments-${loan.id}`);
+            actionsEl.innerHTML = '';
+            repaymentsEl.innerHTML = '';
+
+            // If admin show approve/reject
+            if (simulateAdmin) {
+                const approveBtn = document.createElement('button');
+                approveBtn.className = 'btn btn-sm btn-success me-2';
+                approveBtn.textContent = 'Approve';
+                approveBtn.onclick = () => decision(loan.id, 'approve');
+
+                const rejectBtn = document.createElement('button');
+                rejectBtn.className = 'btn btn-sm btn-danger me-2';
+                rejectBtn.textContent = 'Reject';
+                rejectBtn.onclick = () => decision(loan.id, 'reject');
+
+                actionsEl.appendChild(approveBtn);
+                actionsEl.appendChild(rejectBtn);
+            }
+
+            // Repayment form for owners or admin
+            const repayForm = document.createElement('form');
+            repayForm.className = 'd-flex gap-2 align-items-center mt-2';
+            repayForm.onsubmit = async (e) => {
+                e.preventDefault();
+                const input = repayForm.querySelector('input');
+                const amount = parseFloat(input.value);
+                if (!amount || amount <= 0) return showAlert('Enter valid amount', 'warning');
+                await repay(loan.id, amount);
+                input.value = '';
+                loadLoans();
+            };
+
+            repayForm.innerHTML = '<input class="form-control form-control-sm" style="max-width:120px" placeholder="amount" required> <button class="btn btn-sm btn-primary">Pay</button>';
+            actionsEl.appendChild(repayForm);
+
+            // Load repayments
+            fetch(`/api/loans/${loan.id}/repayments`, { headers: getAuthHeaders() })
+                .then(r => r.ok ? r.json() : [])
+                .then(data => {
+                    if (!data || data.length === 0) {
+                        repaymentsEl.innerHTML = '<small class="text-muted">No repayments</small>';
+                        return;
+                    }
+                    repaymentsEl.innerHTML = '<ul class="list-unstyled mt-2">' + data.map(r => `<li>${r.amount} — ${new Date(r.paid_at).toLocaleString()}</li>`).join('') + '</ul>';
+                }).catch(console.error);
+        }
+
+        async function decision(id, action) {
+            try {
+                const res = await fetch(`/api/loans/${id}/decision`, { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ action }) });
+                if (res.ok) {
+                    showAlert(`Loan ${action}d`, 'success');
+                    loadLoans();
+                } else {
+                    const j = await res.json();
+                    showAlert(j.error || 'Decision failed', 'danger');
+                }
+            } catch (err) {
+                console.error(err);
+                showAlert('Decision failed', 'danger');
+            }
+        }
+
+        async function repay(id, amount) {
+            try {
+                const res = await fetch(`/api/loans/${id}/repayment`, { method: 'POST', headers: getAuthHeaders(), body: JSON.stringify({ amount }) });
+                if (res.ok) showAlert('Repayment recorded', 'success');
+                else {
+                    const j = await res.json();
+                    showAlert(j.error || 'Repayment failed', 'danger');
+                }
+            } catch (err) {
+                console.error(err);
+                showAlert('Repayment failed', 'danger');
+            }
+        }
+
+        function showAlert(message, type) {
+            const alertDiv = document.createElement('div');
+            alertDiv.className = `alert alert-${type} alert-dismissible fade show`;
+            alertDiv.innerHTML = `${message} <button type="button" class="btn-close" data-bs-dismiss="alert"></button>`;
+            document.querySelector('.container').insertBefore(alertDiv, document.querySelector('.row'));
+            setTimeout(() => alertDiv.remove(), 5000);
+        }
+    </script>
+            }, 5000);
+        }
+    </script>
+</body>
+</html>
