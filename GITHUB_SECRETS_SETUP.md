@@ -25,27 +25,20 @@ You need to configure 2 required secrets (and 1 optional).
 
 #### 2. DOCKER_PASSWORD
 
-**What it is:** Personal Access Token from Docker Hub (NOT your password!)
-
-**Why use token:** More secure than password, can be revoked independently
-
-**How to create it:**
-1. Log in to https://hub.docker.com
-2. Go to **Account Settings** (top right)
-3. Click **Security**
-4. Click **New Access Token**
-5. Enter name: `GitHub Actions`
-6. Select **Read & Write** permissions
-7. Click **Generate**
-8. **Copy the token immediately** (you won't see it again!)
+**What it is:** Your Docker Hub password
 
 **How to set it in GitHub:**
-1. Go to your GitHub repository
-2. Click: **Settings** → **Secrets and variables** → **Actions**
-3. Click **New repository secret**
-4. Name: `DOCKER_PASSWORD`
-5. Value: Paste the token you just copied
-6. Click **Add secret**
+1. Log in to https://hub.docker.com
+2. Go to **Account Settings** (top right)
+3. Get your Docker Hub password (the one you use to log in)
+4. Go to your GitHub repository
+5. Click: **Settings** → **Secrets and variables** → **Actions**
+6. Click **New repository secret**
+7. Name: `DOCKER_PASSWORD`
+8. Value: Your Docker Hub password
+9. Click **Add secret**
+
+**Note:** Make sure you're using your actual Docker Hub login password, not your email address.
 
 #### 3. SLACK_WEBHOOK_URL (Optional)
 
