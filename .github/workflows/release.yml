@@ -43,13 +43,27 @@ jobs:
     - name: Set up Docker Buildx
       uses: docker/setup-buildx-action@v3
     
+    - name: Check Docker Hub credentials
+      id: check-creds
+      run: |
+        if [ -z "${{ secrets.DOCKER_USERNAME }}" ] || [ -z "${{ secrets.DOCKER_PASSWORD }}" ]; then
+          echo "available=false" >> $GITHUB_OUTPUT
+          echo "⚠️  Docker Hub credentials not configured"
+          echo "Skipping Docker image build and push"
+        else
+          echo "available=true" >> $GITHUB_OUTPUT
+          echo "✓ Docker Hub credentials available"
+        fi
+    
     - name: Login to Docker Hub
+      if: steps.check-creds.outputs.available == 'true'
       uses: docker/login-action@v3
       with:
         username: ${{ secrets.DOCKER_USERNAME }}
         password: ${{ secrets.DOCKER_PASSWORD }}
     
     - name: Build and push Docker image
+      if: steps.check-creds.outputs.available == 'true'
       uses: docker/build-push-action@v5
       with:
         context: .
@@ -61,9 +75,19 @@ jobs:
         cache-to: type=registry,ref=${{ secrets.DOCKER_USERNAME }}/notes-app:buildcache,mode=max
     
     - name: Verify image
+      if: steps.check-creds.outputs.available == 'true'
       run: |
         docker pull ${{ secrets.DOCKER_USERNAME }}/notes-app:${{ needs.verify.outputs.version }}
         docker inspect ${{ secrets.DOCKER_USERNAME }}/notes-app:${{ needs.verify.outputs.version }}
+    
+    - name: Docker Hub credentials not configured
+      if: steps.check-creds.outputs.available == 'false'
+      run: |
+        echo "ℹ️  To enable Docker image builds:"
+        echo "1. Go to GitHub Repo → Settings → Secrets → Actions"
+        echo "2. Add DOCKER_USERNAME secret"
+        echo "3. Add DOCKER_PASSWORD secret"
+        echo "4. Create another release tag to trigger Docker build"
 
   generate-release-artifacts:
     needs: [verify, build-and-push]
