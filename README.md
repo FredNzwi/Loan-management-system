@@ -80,11 +80,26 @@ notes/
 ├── docker-compose.yml      # Development environment setup
 ├── healthcheck.js          # Docker health check script
 ├── README.md               # This documentation
+├── k8s/                    # Kubernetes manifests (Phase 6)
+│   ├── namespace.yaml
+│   ├── configmap.yaml
+│   ├── mysql.yaml
+│   ├── deployment-rolling.yaml
+│   ├── deployment-blue-green.yaml
+│   ├── autoscaling.yaml
+│   ├── ingress.yaml
+│   └── monitoring.yaml
+├── scripts/                # Automation scripts
+│   ├── release.sh          # Release management (Phase 5)
+│   ├── deploy.sh           # Kubernetes deployment (Phase 6)
+│   └── blue-green.sh       # Blue-green management (Phase 6)
 ├── public/
 │   └── index.html          # Bootstrap frontend
 ├── .github/workflows/
-│   └── ci.yml              # GitHub Actions CI/CD pipeline
-├── tests/                  # Test files (to be created)
+│   ├── ci.yml              # GitHub Actions CI/CD pipeline
+│   ├── release.yml         # Release pipeline (Phase 5)
+│   └── deploy.yml          # Deployment pipeline (Phase 6)
+├── tests/                  # Test files
 └── docs/                   # Additional documentation
 ```
 

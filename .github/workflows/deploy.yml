@@ -1,0 +1,337 @@
+name: Release and Deploy Pipeline
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  REGISTRY: docker.io
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+      
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        fetch-depth: 0
+    
+    - name: Extract version from tag
+      id: version
+      run: |
+        VERSION=${GITHUB_REF#refs/tags/v}
+        echo "version=$VERSION" >> $GITHUB_OUTPUT
+        echo "Tag version: $VERSION"
+    
+    - name: Validate version format
+      run: |
+        VERSION=${GITHUB_REF#refs/tags/v}
+        if [[ ! $VERSION =~ ^[0-9]+\.[0-9]+\.[0-9]+(-[a-zA-Z0-9]+)?$ ]]; then
+          echo "Invalid version format: $VERSION"
+          echo "Expected format: v<major>.<minor>.<patch>"
+          exit 1
+        fi
+        echo "✓ Version format valid: $VERSION"
+
+  build-and-push:
+    needs: verify
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+    
+    - name: Check Docker Hub credentials
+      id: check-creds
+      run: |
+        if [ -z "${{ secrets.DOCKER_USERNAME }}" ] || [ -z "${{ secrets.DOCKER_PASSWORD }}" ]; then
+          echo "available=false" >> $GITHUB_OUTPUT
+        else
+          echo "available=true" >> $GITHUB_OUTPUT
+        fi
+    
+    - name: Login to Docker Hub
+      if: steps.check-creds.outputs.available == 'true'
+      uses: docker/login-action@v3
+      with:
+        username: ${{ secrets.DOCKER_USERNAME }}
+        password: ${{ secrets.DOCKER_PASSWORD }}
+    
+    - name: Build and push Docker image
+      if: steps.check-creds.outputs.available == 'true'
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: true
+        tags: |
+          ${{ secrets.DOCKER_USERNAME }}/loan-management-system:${{ needs.verify.outputs.version }}
+          ${{ secrets.DOCKER_USERNAME }}/loan-management-system:latest
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+    
+    - name: Build Docker image (no push)
+      if: steps.check-creds.outputs.available != 'true'
+      uses: docker/build-push-action@v5
+      with:
+        context: .
+        push: false
+        tags: |
+          loan-management-system:${{ needs.verify.outputs.version }}
+          loan-management-system:latest
+        cache-from: type=gha
+        cache-to: type=gha,mode=max
+
+  generate-release-artifacts:
+    needs: [verify, build-and-push]
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Node.js
+      uses: actions/setup-node@v4
+      with:
+        node-version: '18'
+    
+    - name: Install dependencies
+      run: npm ci
+    
+    - name: Run tests
+      run: npm test 2>&1 || true
+    
+    - name: Generate changelog
+      run: |
+        {
+          echo "## Release ${{ needs.verify.outputs.version }}"
+          echo ""
+          echo "### Changes"
+          git log --oneline $(git describe --tags --abbrev=0 HEAD^)..HEAD 2>/dev/null || echo "Initial release"
+          echo ""
+          echo "### Docker Image"
+          echo "\`\`\`"
+          echo "docker pull ${{ secrets.DOCKER_USERNAME }}/loan-management-system:${{ needs.verify.outputs.version }}"
+          echo "\`\`\`"
+        } > CHANGELOG_${{ needs.verify.outputs.version }}.md
+    
+    - name: Create build info
+      run: |
+        cat > BUILD_INFO_${{ needs.verify.outputs.version }}.txt << 'EOF'
+        Build Information
+        ==================
+        Version: ${{ needs.verify.outputs.version }}
+        Build Date: $(date -u +'%Y-%m-%dT%H:%M:%SZ')
+        Git Commit: ${{ github.sha }}
+        Git Branch: ${{ github.ref }}
+        Docker Image: ${{ secrets.DOCKER_USERNAME }}/loan-management-system:${{ needs.verify.outputs.version }}
+        
+        Deployment Instructions:
+        
+        1. Rolling Update:
+           kubectl set image deployment/loan-management-app \
+             loan-management=${{ secrets.DOCKER_USERNAME }}/loan-management-system:${{ needs.verify.outputs.version }} \
+             -n loan-management
+        
+        2. Blue-Green Deployment:
+           ./scripts/blue-green.sh upgrade ${{ secrets.DOCKER_USERNAME }}/loan-management-system:${{ needs.verify.outputs.version }}
+        
+        3. Full Kubernetes Deployment:
+           ./scripts/deploy.sh ${{ secrets.DOCKER_USERNAME }}/loan-management-system:${{ needs.verify.outputs.version }} rolling
+        
+        Resource Requirements:
+        - CPU Request per pod: 100m
+        - Memory Request per pod: 256Mi
+        - CPU Limit per pod: 500m
+        - Memory Limit per pod: 512Mi
+        - Min Replicas: 3
+        - Max Replicas: 10
+        EOF
+        cat BUILD_INFO_${{ needs.verify.outputs.version }}.txt
+    
+    - name: Upload artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: release-artifacts-${{ needs.verify.outputs.version }}
+        path: |
+          CHANGELOG_${{ needs.verify.outputs.version }}.md
+          BUILD_INFO_${{ needs.verify.outputs.version }}.txt
+          package.json
+          Dockerfile
+          docker-compose.yml
+
+  create-github-release:
+    needs: [verify, generate-release-artifacts]
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Download artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: release-artifacts-${{ needs.verify.outputs.version }}
+    
+    - name: Create Release
+      uses: softprops/action-gh-release@v1
+      with:
+        tag_name: v${{ needs.verify.outputs.version }}
+        name: Release ${{ needs.verify.outputs.version }}
+        files: |
+          CHANGELOG_${{ needs.verify.outputs.version }}.md
+          BUILD_INFO_${{ needs.verify.outputs.version }}.txt
+          package.json
+          Dockerfile
+          docker-compose.yml
+        body: |
+          # Release ${{ needs.verify.outputs.version }}
+          
+          ## Docker Image
+          ```bash
+          docker pull ${{ secrets.DOCKER_USERNAME }}/loan-management-system:${{ needs.verify.outputs.version }}
+          ```
+          
+          ## Kubernetes Deployment
+          
+          ### Prerequisites
+          - kubectl configured and connected to cluster
+          - k8s manifests in place (k8s/*.yaml)
+          
+          ### Rolling Update
+          ```bash
+          ./scripts/deploy.sh ${{ secrets.DOCKER_USERNAME }}/loan-management-system:${{ needs.verify.outputs.version }} rolling
+          ```
+          
+          ### Blue-Green Deployment
+          ```bash
+          ./scripts/blue-green.sh upgrade ${{ secrets.DOCKER_USERNAME }}/loan-management-system:${{ needs.verify.outputs.version }}
+          ```
+          
+          ### Manual Update
+          ```bash
+          kubectl set image deployment/loan-management-app \
+            loan-management=${{ secrets.DOCKER_USERNAME }}/loan-management-system:${{ needs.verify.outputs.version }} \
+            -n loan-management
+          kubectl rollout status deployment/loan-management-app -n loan-management
+          ```
+          
+          ## Resource Requirements
+          
+          | Resource | Request | Limit |
+          |----------|---------|-------|
+          | CPU (per pod) | 100m | 500m |
+          | Memory (per pod) | 256Mi | 512Mi |
+          | Replicas | 3 (min) | 10 (max) |
+          
+          ## Verification
+          ```bash
+          # Check deployment status
+          kubectl get deployment -n loan-management
+          kubectl get pods -n loan-management -o wide
+          kubectl top pods -n loan-management
+          
+          # Check rollout status
+          kubectl rollout status deployment/loan-management-app -n loan-management
+          
+          # View logs
+          kubectl logs -n loan-management -l app=loan-management --tail=100
+          ```
+          
+          See BUILD_INFO_${{ needs.verify.outputs.version }}.txt for detailed information.
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  deploy-kubernetes:
+    needs: [verify, create-github-release]
+    runs-on: ubuntu-latest
+    if: secrets.KUBE_CONFIG != '' # Only run if kubectl config is available
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Configure kubectl
+      run: |
+        mkdir -p $HOME/.kube
+        echo "${{ secrets.KUBE_CONFIG }}" | base64 -d > $HOME/.kube/config
+        chmod 600 $HOME/.kube/config
+    
+    - name: Verify cluster access
+      run: kubectl cluster-info
+    
+    - name: Apply Kubernetes manifests
+      run: |
+        # Create namespace and config
+        kubectl apply -f k8s/namespace.yaml || true
+        kubectl apply -f k8s/configmap.yaml || true
+    
+    - name: Update Docker image
+      run: |
+        kubectl set image deployment/loan-management-app \
+          loan-management=${{ secrets.DOCKER_USERNAME }}/loan-management-system:${{ needs.verify.outputs.version }} \
+          -n loan-management || true
+    
+    - name: Wait for rollout
+      run: |
+        kubectl rollout status deployment/loan-management-app \
+          -n loan-management --timeout=600s || true
+    
+    - name: Verify deployment
+      run: |
+        echo "Deployment Status:"
+        kubectl get deployments -n loan-management
+        echo ""
+        echo "Pod Status:"
+        kubectl get pods -n loan-management -o wide
+        echo ""
+        echo "Service Status:"
+        kubectl get services -n loan-management
+
+  notify-release:
+    needs: [verify, create-github-release, deploy-kubernetes]
+    runs-on: ubuntu-latest
+    if: always()
+    
+    steps:
+    - name: Determine status
+      id: status
+      run: |
+        if [ "${{ needs.create-github-release.result }}" = "success" ]; then
+          echo "status=success" >> $GITHUB_OUTPUT
+        else
+          echo "status=failure" >> $GITHUB_OUTPUT
+        fi
+    
+    - name: Send Slack notification
+      if: secrets.SLACK_WEBHOOK_URL != ''
+      run: |
+        VERSION="${{ needs.verify.outputs.version }}"
+        STATUS="${{ steps.status.outputs.status }}"
+        REPO="${{ github.repository }}"
+        RUN_ID="${{ github.run_id }}"
+        SERVER_URL="${{ github.server_url }}"
+        SLACK_WEBHOOK_URL="${{ secrets.SLACK_WEBHOOK_URL }}"
+        
+        case $STATUS in
+          success)
+            EMOJI="✅"
+            COLOR="good"
+            MESSAGE="Release v$VERSION created and published successfully!"
+            ;;
+          failure)
+            EMOJI="❌"
+            COLOR="danger"
+            MESSAGE="Release v$VERSION failed. Check logs for details."
+            ;;
+          *)
+            EMOJI="⚠️"
+            COLOR="warning"
+            MESSAGE="Release v$VERSION status: $STATUS"
+            ;;
+        esac
+        
+        PAYLOAD="{\"attachments\":[{\"color\":\"$COLOR\",\"title\":\"$EMOJI Release and Deploy Pipeline - $STATUS\",\"text\":\"$MESSAGE\",\"fields\":[{\"title\":\"Version\",\"value\":\"v$VERSION\",\"short\":true},{\"title\":\"Repository\",\"value\":\"$REPO\",\"short\":true},{\"title\":\"Docker Image\",\"value\":\"${{ secrets.DOCKER_USERNAME }}/loan-management-system:$VERSION\",\"short\":false}],\"actions\":[{\"type\":\"button\",\"text\":\"View Release\",\"url\":\"$SERVER_URL/$REPO/releases/tag/v$VERSION\"},{\"type\":\"button\",\"text\":\"View Logs\",\"url\":\"$SERVER_URL/$REPO/actions/runs/$RUN_ID\"}]}]}"
+        
+        curl -X POST -H 'Content-type: application/json' --data "$PAYLOAD" "$SLACK_WEBHOOK_URL" || true

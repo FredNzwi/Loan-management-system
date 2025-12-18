@@ -1,0 +1,9 @@
+---
+# Kubernetes Namespace for Loan Management System
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: loan-management
+  labels:
+    name: loan-management
+    environment: production

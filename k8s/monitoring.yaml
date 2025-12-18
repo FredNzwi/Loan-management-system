@@ -1,0 +1,67 @@
+---
+# Prometheus ServiceMonitor for metrics collection
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: loan-management-monitor
+  namespace: loan-management
+  labels:
+    app: loan-management
+spec:
+  selector:
+    matchLabels:
+      app: loan-management
+  endpoints:
+  - port: http
+    interval: 30s
+    path: /metrics
+    scrapeTimeout: 10s
+
+---
+# PrometheusRule for alerting
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: loan-management-rules
+  namespace: loan-management
+  labels:
+    app: loan-management
+spec:
+  groups:
+  - name: loan-management-alerts
+    interval: 30s
+    rules:
+    - alert: LoanManagementHighErrorRate
+      expr: rate(http_requests_total{status=~"5.."}[5m]) > 0.05
+      for: 5m
+      annotations:
+        summary: "High error rate detected"
+        description: "Error rate {{ $value }} is above 5% threshold"
+    
+    - alert: LoanManagementHighMemoryUsage
+      expr: container_memory_usage_bytes{pod=~"loan-management-.*"} / container_spec_memory_limit_bytes > 0.9
+      for: 5m
+      annotations:
+        summary: "High memory usage detected"
+        description: "Memory usage {{ $value | humanizePercentage }} is above 90%"
+    
+    - alert: LoanManagementHighCPUUsage
+      expr: rate(container_cpu_usage_seconds_total{pod=~"loan-management-.*"}[5m]) > 0.8
+      for: 5m
+      annotations:
+        summary: "High CPU usage detected"
+        description: "CPU usage {{ $value | humanizePercentage }} is above 80%"
+    
+    - alert: LoanManagementPodDown
+      expr: count(up{job="loan-management"} == 0) > 0
+      for: 2m
+      annotations:
+        summary: "Pod is down"
+        description: "Pod {{ $labels.pod }} is not responding"
+    
+    - alert: DatabaseConnectionFailures
+      expr: rate(db_connection_errors_total[5m]) > 0.1
+      for: 5m
+      annotations:
+        summary: "Database connection failures detected"
+        description: "Database connection error rate is {{ $value }}/sec"

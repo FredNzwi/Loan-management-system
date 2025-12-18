@@ -1,0 +1,141 @@
+---
+# Loan Management System Deployment with Rolling Updates
+# This implements the standard rolling update strategy with health checks
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: loan-management-app
+  namespace: loan-management
+  labels:
+    app: loan-management
+    version: v1
+    component: backend
+spec:
+  replicas: 3  # 3 replicas for high availability
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1        # Allow one extra pod during update (3 + 1 = 4 max)
+      maxUnavailable: 0  # Zero downtime - never take a pod down without replacement
+  selector:
+    matchLabels:
+      app: loan-management
+  minReadySeconds: 10  # Wait 10 seconds before considering a pod ready
+  progressDeadlineSeconds: 300  # Abort rollout if not progressing in 5 minutes
+  revisionHistoryLimit: 10  # Keep last 10 revisions for easy rollback
+  template:
+    metadata:
+      labels:
+        app: loan-management
+        version: v1
+        component: backend
+      annotations:
+        prometheus.io/scrape: "true"
+        prometheus.io/port: "3000"
+        prometheus.io/path: "/metrics"
+    spec:
+      affinity:
+        podAntiAffinity:
+          preferredDuringSchedulingIgnoredDuringExecution:
+          - weight: 100
+            podAffinityTerm:
+              labelSelector:
+                matchExpressions:
+                - key: app
+                  operator: In
+                  values:
+                  - loan-management
+              topologyKey: kubernetes.io/hostname
+      containers:
+      - name: loan-management
+        image: khalifa7/loan-management-system:1.3.0  # Update tag as needed
+        imagePullPolicy: IfNotPresent
+        ports:
+        - containerPort: 3000
+          name: http
+          protocol: TCP
+        env:
+        - name: NODE_ENV
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: NODE_ENV
+        - name: PORT
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: PORT
+        - name: DB_HOST
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: DB_HOST
+        - name: DB_PORT
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: DB_PORT
+        - name: DB_NAME
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: DB_NAME
+        - name: DB_USER
+          valueFrom:
+            configMapKeyRef:
+              name: app-config
+              key: DB_USER
+        resources:
+          requests:
+            memory: "256Mi"
+            cpu: "100m"
+          limits:
+            memory: "512Mi"
+            cpu: "500m"
+        livenessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 30
+          periodSeconds: 10
+          timeoutSeconds: 5
+          failureThreshold: 3
+        readinessProbe:
+          httpGet:
+            path: /health
+            port: 3000
+          initialDelaySeconds: 10
+          periodSeconds: 5
+          timeoutSeconds: 3
+          failureThreshold: 2
+        securityContext:
+          runAsNonRoot: true
+          runAsUser: 1001
+          allowPrivilegeEscalation: false
+          readOnlyRootFilesystem: false
+          capabilities:
+            drop:
+            - ALL
+
+---
+# Service for Load Balancing
+apiVersion: v1
+kind: Service
+metadata:
+  name: loan-management-service
+  namespace: loan-management
+  labels:
+    app: loan-management
+spec:
+  type: LoadBalancer
+  selector:
+    app: loan-management
+  ports:
+  - port: 80
+    targetPort: 3000
+    protocol: TCP
+    name: http
+  sessionAffinity: ClientIP
+  sessionAffinityConfig:
+    clientIP:
+      timeoutSeconds: 3600

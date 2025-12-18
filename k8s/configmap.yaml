@@ -1,0 +1,29 @@
+---
+# MySQL ConfigMap for database configuration
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: mysql-config
+  namespace: loan-management
+data:
+  MYSQL_DATABASE: loan_management
+  MYSQL_ROOT_PASSWORD: "root_password_change_in_production"
+  MYSQL_HOST: mysql-service
+  MYSQL_PORT: "3306"
+
+---
+# Node.js Application ConfigMap
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: app-config
+  namespace: loan-management
+data:
+  NODE_ENV: "production"
+  PORT: "3000"
+  DB_HOST: "mysql-service"
+  DB_PORT: "3306"
+  DB_NAME: "loan_management"
+  DB_USER: "root"
+  LOG_LEVEL: "info"
+  HEALTH_CHECK_INTERVAL: "30000"
